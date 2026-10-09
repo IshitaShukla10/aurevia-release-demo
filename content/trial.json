@@ -1,0 +1,78 @@
+{
+  "schema": "aurevia.trial/v1",
+  "trialId": "AV-301",
+  "product": "Aurevia",
+  "contentVersion": "1.3.0",
+  "status": "recruiting",
+  "validFrom": "2026-09-01",
+  "validUntil": "2027-03-31",
+  "approval": {
+    "reference": "MLR-AV301-0142",
+    "contentVersion": "1.3.0",
+    "approvedBy": "Medical reviewer (fictional)",
+    "approvedAt": "2026-09-28T09:00:00Z",
+    "system": "MLR export (simulated)"
+  },
+  "markets": {
+    "sg-en": {
+      "country": "Singapore",
+      "lang": "en-SG",
+      "path": "/sg/en/",
+      "title": "Aurevia clinical trial AV-301",
+      "statusHeading": "Trial status",
+      "statusLabel": {
+        "recruiting": "Recruiting",
+        "enrollment-paused": "Enrollment paused"
+      },
+      "statusDetail": {
+        "recruiting": "Study sites in this market are accepting new participants.",
+        "enrollment-paused": "New enrollment is paused. Current participants should contact their study site."
+      },
+      "summary": "AV-301 is a fictional study used to demonstrate a governed publishing workflow.",
+      "approvedLabel": "Approved content reference",
+      "releaseLabel": "Release",
+      "marketLabel": "Change market",
+      "disclaimer": "Fictional demonstration site. Not medical information."
+    },
+    "id-id": {
+      "country": "Indonesia",
+      "lang": "id-ID",
+      "path": "/id/id/",
+      "title": "Uji klinis Aurevia AV-301",
+      "statusHeading": "Status uji klinis",
+      "statusLabel": {
+        "recruiting": "Menerima peserta",
+        "enrollment-paused": "Pendaftaran dihentikan sementara"
+      },
+      "statusDetail": {
+        "recruiting": "Lokasi studi di negara ini menerima peserta baru.",
+        "enrollment-paused": "Pendaftaran baru dihentikan sementara. Peserta saat ini dapat menghubungi lokasi studi mereka."
+      },
+      "summary": "AV-301 adalah studi fiktif untuk mendemonstrasikan alur publikasi yang terkendali.",
+      "approvedLabel": "Referensi persetujuan konten",
+      "releaseLabel": "Rilis",
+      "marketLabel": "Ganti negara",
+      "disclaimer": "Situs demonstrasi fiktif. Bukan informasi medis."
+    },
+    "vn-vi": {
+      "country": "Việt Nam",
+      "lang": "vi-VN",
+      "path": "/vn/vi/",
+      "title": "Thử nghiệm lâm sàng Aurevia AV-301",
+      "statusHeading": "Tình trạng thử nghiệm",
+      "statusLabel": {
+        "recruiting": "Đang tuyển người tham gia",
+        "enrollment-paused": "Tạm ngừng tuyển người tham gia"
+      },
+      "statusDetail": {
+        "recruiting": "Các điểm nghiên cứu tại thị trường này đang nhận người tham gia mới.",
+        "enrollment-paused": "Việc tuyển mới đang tạm ngừng. Người đang tham gia vui lòng liên hệ điểm nghiên cứu của mình."
+      },
+      "summary": "AV-301 là một nghiên cứu hư cấu dùng để minh họa quy trình xuất bản có kiểm soát.",
+      "approvedLabel": "Mã phê duyệt nội dung",
+      "releaseLabel": "Phiên bản phát hành",
+      "marketLabel": "Đổi thị trường",
+      "disclaimer": "Trang trình diễn hư cấu. Không phải thông tin y tế."
+    }
+  }
+}

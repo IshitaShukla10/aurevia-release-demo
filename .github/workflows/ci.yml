@@ -1,0 +1,39 @@
+# Pull requests: prove the change is releasable. No secrets, no deployment.
+name: ci
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# bash with -e and -o pipefail, so `cmd | tee log` fails when cmd fails.
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  check:
+    name: Validate, test, build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Validate content snapshot (approval must match this content version)
+        run: npm run validate
+      - name: Release-policy tests
+        run: npm test
+      - name: Build and verify bundle
+        env:
+          SITE_URL: ${{ vars.PRODUCTION_URL }}
+        run: |
+          npm run build
+          npm run verify
+      - name: Unsafe releases are blocked
+        run: npm run demo:blocked

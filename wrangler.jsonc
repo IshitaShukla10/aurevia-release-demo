@@ -1,0 +1,25 @@
+// Assets-only Worker: no custom code runs per request; Workers Static Assets serves
+// the approved bundle. Production = top level; staging = env.staging (a separate Worker).
+// Enterprise target state: separate non-production and production accounts.
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "aurevia-trial",
+  "compatibility_date": "2025-09-01",
+  "assets": {
+    "directory": "./dist",
+    "not_found_handling": "404-page",
+    "html_handling": "auto-trailing-slash"
+  },
+  // Demo uses the workers.dev hostname. Production design: custom domain on the
+  // customer's zone, then set workers_dev to false.
+  "workers_dev": true,
+  // No per-version preview URLs: every reachable alias is a URL we would have to protect.
+  "preview_urls": false,
+  "env": {
+    "staging": {
+      "name": "aurevia-trial-staging",
+      "workers_dev": true,
+      "preview_urls": false
+    }
+  }
+}

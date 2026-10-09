@@ -1,0 +1,79 @@
+# Technical regression: restore an explicit, still-approved Worker version.
+# Withdrawn content is NOT a rollback case — publish an approved correction instead.
+name: rollback
+on:
+  workflow_dispatch:
+    inputs:
+      version_id:
+        description: Worker version ID to restore (from a previous release record or `wrangler versions list`)
+        required: true
+        type: string
+      reason:
+        description: Why (recorded on the deployment)
+        required: true
+        type: string
+      content_still_approved:
+        description: I confirm the content in that version is still approved for publication
+        required: true
+        type: boolean
+
+permissions:
+  contents: read
+
+# bash with -e and -o pipefail, so `cmd | tee log` fails when cmd fails.
+defaults:
+  run:
+    shell: bash
+
+concurrency:
+  group: production-release
+  cancel-in-progress: false
+
+jobs:
+  rollback:
+    name: Restore approved version
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+      url: ${{ vars.PRODUCTION_URL }}
+    env:
+      VERSION_ID: ${{ inputs.version_id }}
+      REASON: ${{ inputs.reason }}
+      CONFIRMED: ${{ inputs.content_still_approved }}
+      PRODUCTION_URL: ${{ vars.PRODUCTION_URL }}
+    steps:
+      - name: Content authority confirmation
+        run: |
+          if [ "$CONFIRMED" != "true" ]; then
+            echo "::error::Rollback refused: the content in the target version must still be approved. Publish an approved correction instead."
+            exit 1
+          fi
+          [[ "$VERSION_ID" =~ ^[0-9a-f-]{36}$ ]] || { echo "::error::version_id must be a Worker version UUID"; exit 1; }
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Roll back
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          START=$(date +%s)
+          npx wrangler rollback "$VERSION_ID" --env="" --message "${REASON:0:90}" --yes
+          echo "ROLLBACK_SECONDS=$(( $(date +%s) - START ))" >> "$GITHUB_ENV"
+      - name: Verify what is live now
+        run: |
+          sleep 5
+          node scripts/smoke.mjs "$PRODUCTION_URL" | tee smoke.log
+          {
+            echo "## Rolled back to \`$VERSION_ID\` in ${ROLLBACK_SECONDS}s"
+            echo "Reason: $REASON"
+            echo '```'
+            cat smoke.log
+            echo '```'
+            echo "Next: reconcile \`main\` so the next release does not re-introduce the regression."
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -1,0 +1,241 @@
+# Build once -> deploy the candidate to protected staging -> wait for release approval
+# -> promote the SAME verified bundle to production -> verify what is live.
+#
+# Release authority lives in repository settings, not in this file:
+#   Settings > Environments > production > Required reviewers (+ prevent self-review)
+#   The production CLOUDFLARE_API_TOKEN is an environment secret, so it only exists
+#   inside the production job, after the reviewers approve.
+name: release
+on:
+  push:
+    branches: [main]
+    paths:
+      - content/**
+      - site/**
+      - scripts/**
+      - wrangler.jsonc
+      - package.json
+      - package-lock.json
+      - .github/workflows/release.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# bash with -e and -o pipefail, so `cmd | tee log` fails when cmd fails.
+defaults:
+  run:
+    shell: bash
+
+# One release or rollback at a time; never cancel a promotion half-way.
+concurrency:
+  group: production-release
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: 1 · Build once
+    runs-on: ubuntu-latest
+    outputs:
+      release_id: ${{ steps.build.outputs.release_id }}
+      bundle_digest: ${{ steps.build.outputs.bundle_digest }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Validate content snapshot
+        run: npm run validate
+      - name: Release-policy tests
+        run: npm test
+      - name: Build release bundle
+        id: build
+        env:
+          SITE_URL: ${{ vars.PRODUCTION_URL }}
+        run: node scripts/build.mjs content/trial.json
+      - name: Verify bundle against its manifest
+        env:
+          DIGEST: ${{ steps.build.outputs.bundle_digest }}
+        run: node scripts/verify-bundle.mjs dist --expect-digest "$DIGEST"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: release-bundle
+          path: dist/
+          if-no-files-found: error
+          retention-days: 90
+      - name: Summary
+        env:
+          RELEASE_ID: ${{ steps.build.outputs.release_id }}
+          DIGEST: ${{ steps.build.outputs.bundle_digest }}
+        run: |
+          {
+            echo "## Candidate built: \`$RELEASE_ID\`"
+            echo ""
+            echo "| | |"
+            echo "|---|---|"
+            echo "| Trial status | \`$(jq -r .status dist/release.json)\` |"
+            echo "| Content version | \`$(jq -r .contentVersion dist/release.json)\` |"
+            echo "| MLR approval | \`$(jq -r .approval.reference dist/release.json)\` |"
+            echo "| Source revision | \`$GITHUB_SHA\` |"
+            echo "| Bundle digest | \`$DIGEST\` |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  staging:
+    name: 2 · Candidate on protected staging
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: staging
+      url: ${{ vars.STAGING_URL }}
+    env:
+      RELEASE_ID: ${{ needs.build.outputs.release_id }}
+      DIGEST: ${{ needs.build.outputs.bundle_digest }}
+      STAGING_URL: ${{ vars.STAGING_URL }}
+      CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
+      CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          name: release-bundle
+          path: dist
+      - name: Verify this is the built bundle
+        run: node scripts/verify-bundle.mjs dist --expect-digest "$DIGEST" --expect-release "$RELEASE_ID"
+      - name: Deploy candidate to staging
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          npx wrangler deploy --env staging \
+            --tag "v$(jq -r .contentVersion dist/release.json)-${RELEASE_ID##*-}" \
+            --message "candidate $RELEASE_ID ${DIGEST:0:12}"
+      - name: Access boundary — staging must not be public
+        run: |
+          for i in 1 2 3 4 5 6; do
+            node scripts/smoke.mjs "$STAGING_URL" --expect-protected && exit 0
+            sleep 5
+          done
+          exit 1
+      - name: Verify candidate content (authenticated with Access service token)
+        if: env.CF_ACCESS_CLIENT_ID != ''
+        run: |
+          for i in 1 2 3 4 5 6; do
+            node scripts/smoke.mjs "$STAGING_URL" --manifest dist/release-manifest.json --expect-release "$RELEASE_ID" && exit 0
+            sleep 5
+          done
+          exit 1
+      - name: Summary
+        run: |
+          {
+            echo "## Candidate \`$RELEASE_ID\` is on staging"
+            echo "Review it at $STAGING_URL (Cloudflare Access login required)."
+            echo ""
+            echo "Production is unchanged until a required reviewer approves the **production** environment."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  production:
+    name: 3 · Promote approved release
+    needs: [build, staging]
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+      url: ${{ vars.PRODUCTION_URL }}
+    permissions:
+      contents: read
+      actions: read # read the approval record for this run
+    env:
+      RELEASE_ID: ${{ needs.build.outputs.release_id }}
+      DIGEST: ${{ needs.build.outputs.bundle_digest }}
+      PRODUCTION_URL: ${{ vars.PRODUCTION_URL }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          name: release-bundle
+          path: dist
+      - name: Verify this is the exact approved bundle
+        run: node scripts/verify-bundle.mjs dist --expect-digest "$DIGEST" --expect-release "$RELEASE_ID"
+      - name: Re-check content approval is still valid today
+        run: node scripts/promotion-check.mjs dist
+      - name: Deploy to production
+        id: deploy
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -o pipefail
+          npx wrangler deploy --env="" \
+            --tag "v$(jq -r .contentVersion dist/release.json)-${RELEASE_ID##*-}" \
+            --message "release $RELEASE_ID ${DIGEST:0:12}" 2>&1 | tee deploy.log
+          VERSION_ID=$(grep -oE 'Current Version ID: [0-9a-f-]+' deploy.log | awk '{print $4}' || true)
+          echo "version_id=${VERSION_ID:-unknown}" >> "$GITHUB_OUTPUT"
+      - name: Verify live production = approved bundle
+        run: |
+          for i in 1 2 3 4 5 6; do
+            node scripts/smoke.mjs "$PRODUCTION_URL" --manifest dist/release-manifest.json --expect-release "$RELEASE_ID" | tee smoke.log && exit 0
+            sleep 5
+          done
+          exit 1
+      - name: TTFB probe from this runner
+        run: node scripts/ttfb.mjs "$PRODUCTION_URL/sg/en/" "$PRODUCTION_URL/id/id/" "$PRODUCTION_URL/vn/vi/" --runs 5 --markdown | tee ttfb.md
+      - name: Release record
+        if: always() && steps.deploy.outcome == 'success'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION_ID: ${{ steps.deploy.outputs.version_id }}
+        run: |
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/approvals" > approvals.json 2>/dev/null || echo '[]' > approvals.json
+          jq -n \
+            --slurpfile release dist/release.json \
+            --slurpfile approvals approvals.json \
+            --arg digest "$DIGEST" --arg version "$VERSION_ID" \
+            --arg run "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
+            --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            '{release: $release[0], bundleDigest: $digest, workerVersionId: $version, publishedAt: $at, workflowRun: $run,
+              releaseApprovals: [$approvals[0][] | {reviewer: .user.login, state: .state, comment: .comment, environments: [.environments[].name]}]}' \
+            > release-record.json
+          {
+            echo "## Live: \`$RELEASE_ID\`"
+            echo ""
+            echo "| | |"
+            echo "|---|---|"
+            echo "| Production | $PRODUCTION_URL |"
+            echo "| Trial status | \`$(jq -r .status dist/release.json)\` |"
+            echo "| MLR approval (content authority) | \`$(jq -r .approval.reference dist/release.json)\` |"
+            echo "| Release approved by | $(jq -r '[.releaseApprovals[] | select(.state=="approved") | .reviewer] | join(", ") | if .=="" then "see run approvals" else . end' release-record.json) |"
+            echo "| Worker version | \`$VERSION_ID\` |"
+            echo "| Bundle digest | \`$DIGEST\` |"
+            echo ""
+            echo "### Delivery probe (from GitHub-hosted runner)"
+            cat ttfb.md 2>/dev/null || true
+            echo ""
+            echo "Rollback: run the **rollback** workflow with a previous, still-approved version ID."
+          } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        if: always() && steps.deploy.outcome == 'success'
+        with:
+          name: release-record-${{ needs.build.outputs.release_id }}
+          path: |
+            release-record.json
+            deploy.log
+            smoke.log
+            ttfb.md
+          retention-days: 90

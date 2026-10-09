@@ -1,0 +1,27 @@
+{
+  "name": "aurevia-release-demo",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Governed static publishing on Cloudflare Workers: build once, approve the exact release, verify the live bundle.",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "validate": "node scripts/validate.mjs content/trial.json",
+    "build": "node scripts/build.mjs content/trial.json",
+    "verify": "node scripts/verify-bundle.mjs dist",
+    "test": "node --test test/*.test.mjs",
+    "check": "npm run validate && npm test && npm run build && npm run verify",
+    "dev": "npm run build && wrangler dev --port 8787",
+    "smoke:local": "node scripts/smoke.mjs http://localhost:8787 --manifest dist/release-manifest.json",
+    "smoke": "node scripts/smoke.mjs",
+    "ttfb": "node scripts/ttfb.mjs",
+    "demo:blocked": "node scripts/demo-negative.mjs",
+    "demo:pause": "node scripts/demo-change.mjs enrollment-paused",
+    "demo:resume": "node scripts/demo-change.mjs recruiting"
+  },
+  "devDependencies": {
+    "wrangler": "4.149.0"
+  }
+}
