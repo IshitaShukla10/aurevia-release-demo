@@ -41,7 +41,8 @@ test('build is deterministic: same inputs give the same digest', async () => {
     const r1 = await build({ outDir: a, env });
     const r2 = await build({ outDir: b, env });
     assert.equal(r1.digest, r2.digest);
-    assert.equal(r1.releaseId, 'AV301-1.3.0-20261009-abc1234');
+    const content = await readJson('content/trial.json');
+    assert.equal(r1.releaseId, `AV301-${content.contentVersion}-20261009-abc1234`);
   } finally { await rm(a, { recursive: true }); await rm(b, { recursive: true }); }
 });
 
@@ -87,7 +88,7 @@ test('verify-bundle detects modified, added and removed files', async () => {
   try {
     await build({ outDir: d, env });
     const page = join(d, 'sg/en/index.html');
-    await writeFile(page, (await readFile(page, 'utf8')).replace('Recruiting', 'Enrollment paused'));
+    await writeFile(page, (await readFile(page, 'utf8')) + '\n<!-- test modification -->');
     await writeFile(join(d, 'extra.html'), '<p>injected</p>');
     await rm(join(d, 'vn/vi/index.html'));
     const r = await verifyBundle(d);
